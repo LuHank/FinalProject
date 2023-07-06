@@ -6,7 +6,6 @@
     - 提供遊戲裝備自由交易(option)  
     - 提供遊戲裝備自由交換  
     - 租用遊戲裝備強化角色(option)  
-    - 抵押遊戲裝備進行投資  
     - 連結元宇宙遊戲  
   - goals  
     - 提供遊戲更好體驗服務  
@@ -22,23 +21,12 @@
   
 - Framework  
   - components & responsibilities  
-    - Mint & Transfer  
+    - Auction Market  
       - ERC721 - one transaction single NFT  
       - ERC721A -  one transaction multiple NFT  
-    - Combine Sell - ERC1155  
-    - Better Price(option)  
-      - Uniswap(Genie)  
+      - Combine Sell - ERC1155  
     - Rent(option)  
-      - ERC4907/ERC809  
-    - AMM(option)  
-      - Sudoswap  
-    - Swap  
-      - Uniswap  
-    - Collateral & Investment  
-      - Compound  
-      - Aave  
-    - Price Feed  
-      - Chainlink  
+      - ERC2615 or reNFT 
   - overall flow  
     ![](./overall-flow.png)  
   - [Nice to have] You can use flowcharts or diagrams to visualize the sequence of steps or interactions between components.  
