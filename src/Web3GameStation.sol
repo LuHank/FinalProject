@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.13;
+pragma solidity ^0.8.7;
 
 import {ERC721A} from "ERC721A/ERC721A.sol";
 import {Ownable} from "openzeppelin/access/Ownable.sol";
 import {MerkleProof} from "openzeppelin/utils/cryptography/MerkleProof.sol";
 import {ERC1155} from "openzeppelin/token/ERC1155/ERC1155.sol";
 import {IERC721} from "openzeppelin/token/ERC721/IERC721.sol";
+import {Registry} from "./Registry.sol";
+import {IRegistry} from "./interfaces/IRegistry.sol";
 
 contract GS1155 is ERC1155, Ownable {
     uint256 public constant GOLD = 0; // 金幣
@@ -25,7 +27,12 @@ contract GS1155 is ERC1155, Ownable {
     bytes32 public saleMerkleRoot;
     bytes32[] public merkleProof;
 
-    constructor(uint256 _startTime, bool _paused, string memory _name, string memory _symbol) ERC1155("") {
+    constructor(
+        uint256 _startTime, 
+        bool _paused, 
+        string memory _name, 
+        string memory _symbol
+    ) ERC1155("") {
         START_TIME = _startTime;
         mintPaused = _paused;
     }
@@ -204,7 +211,8 @@ contract GS721A is ERC721A, Ownable {
     receive() external payable {}
 }
 
-contract Web3GameStation is Ownable {
+contract Web3GameStation is Registry, Ownable {
+// contract Web3GameStation is Ownable {
 
     struct Auction {
         address offer;
@@ -235,13 +243,15 @@ contract Web3GameStation is Ownable {
     bytes32 public saleMerkleRoot;
 
     uint256 public tradeFee = 5;
-    uint256 constant feePercent = 100;
+    uint256 public constant feePercent = 100;
     Auction[] public auctions;
     Bidder[] public bidders;
     address public withdrawAddress; // 出金地址
     address public receipientAddr; // 交易手續費接收者地址
 
-    mapping(address => mapping(uint256 => Auction)) public NFTTokenIdToAution; // nftAddr => tokenId => Auction
+    IRegistry.NFTStandard public nftStandard;
+
+    mapping(address => mapping(uint256 => Auction)) public NFTTokenIdToAuction; // nftAddr => tokenId => Auction
     mapping(address => Auction[]) public auctionOwner; // offerAddress => Auction
     mapping(address => mapping(uint256 => Bidder[])) public NFTTokenIdToBidder; // nftAddr => TokenId => Bidder
     
@@ -257,7 +267,12 @@ contract Web3GameStation is Ownable {
         uint256 _endTime
     );
 
-    constructor() {
+    constructor(
+            address newResolver, 
+            address payable newBeneficiary, 
+            address newAdmin
+        ) Registry(newResolver, newBeneficiary, newAdmin) {
+    // constructor() {
         // owner = msg.sender;
     }
 
@@ -288,7 +303,7 @@ contract Web3GameStation is Ownable {
         withdrawAddress = withdrawAddr;
     }
 
-    // 設定交易手續費接收者地址
+
     function setReceipientAddr(address __receipientAddr) external onlyOwner {
         receipientAddr = __receipientAddr;
     }
@@ -308,7 +323,7 @@ contract Web3GameStation is Ownable {
         uint128 _price,
         uint256 _startTime,
         uint256 _endTime
-    ) public {
+    ) public callerIsUser {
         itemToken = IERC721(_nftAddr);
         require(
             msg.sender == itemToken.ownerOf(_tokenId),
@@ -334,7 +349,7 @@ contract Web3GameStation is Ownable {
             active: true
         });
 
-        NFTTokenIdToAution[_nftAddr][_tokenId] = auction;
+        NFTTokenIdToAuction[_nftAddr][_tokenId] = auction;
         auctions.push(auction);
 
         auctionOwner[msg.sender].push(auction);
@@ -355,10 +370,10 @@ contract Web3GameStation is Ownable {
      * @dev 拍賣出價
      * @param _nftAddr, _tokenId
      */
-    function bidAuction(address _nftAddr, uint256 _tokenId) public payable {
+    function bidAuction(address _nftAddr, uint256 _tokenId) public payable callerIsUser {
         itemToken = IERC721(_nftAddr);
         require(isBidValid(_nftAddr, _tokenId, msg.value));
-        Auction memory auction = NFTTokenIdToAution[_nftAddr][_tokenId];
+        Auction memory auction = NFTTokenIdToAuction[_nftAddr][_tokenId];
         if (block.timestamp > auction.endTime) revert();
 
         require(msg.sender != auction.offer, "Owner can't bid");
@@ -372,8 +387,8 @@ contract Web3GameStation is Ownable {
             "insufficient balance"
         );
         if (msg.value > highestBid) {
-            NFTTokenIdToAution[_nftAddr][_tokenId].highestBid = msg.value;
-            NFTTokenIdToAution[_nftAddr][_tokenId].highestBidder = msg.sender;
+            NFTTokenIdToAuction[_nftAddr][_tokenId].highestBid = msg.value;
+            NFTTokenIdToAuction[_nftAddr][_tokenId].highestBidder = msg.sender;
             if (highestBid > 0) {
                 payable(highestBidder).transfer(highestBid);    // 返還上一個最高出價者
             }
@@ -405,9 +420,9 @@ contract Web3GameStation is Ownable {
      * @dev 完成拍賣
      * @param _nftAddr, _tokenId
      */
-    function completeAuction(address _nftAddr, uint256 _tokenId) public payable {
+    function completeAuction(address _nftAddr, uint256 _tokenId) public payable callerIsUser {
         itemToken = IERC721(_nftAddr);
-        Auction memory auction = NFTTokenIdToAution[_nftAddr][_tokenId];
+        Auction memory auction = NFTTokenIdToAuction[_nftAddr][_tokenId];
         require(
             msg.sender == auction.offer,
             "Should only be called by the offer"
@@ -426,8 +441,8 @@ contract Web3GameStation is Ownable {
 
             // NFT 轉給出價最高者
             itemToken.transferFrom(address(this), _bider, _tokenId);
-            NFTTokenIdToAution[_nftAddr][_tokenId].completed = true;
-            NFTTokenIdToAution[_nftAddr][_tokenId].active = false;
+            NFTTokenIdToAuction[_nftAddr][_tokenId].completed = true;
+            NFTTokenIdToAuction[_nftAddr][_tokenId].active = false;
             delete NFTTokenIdToBidder[_nftAddr][_tokenId];
 
             emit AuctionStatusChange(
@@ -452,7 +467,7 @@ contract Web3GameStation is Ownable {
         view
         returns (bool)
     {
-        Auction memory auction = NFTTokenIdToAution[_nftAddr][_tokenId];
+        Auction memory auction = NFTTokenIdToAuction[_nftAddr][_tokenId];
         uint256 startTime = auction.startTime;
         uint256 endTime = auction.endTime;
         address offer = auction.offer;
@@ -485,7 +500,7 @@ contract Web3GameStation is Ownable {
             bool
         )
     {
-        Auction memory auction = NFTTokenIdToAution[_nftAddr][_tokenId];
+        Auction memory auction = NFTTokenIdToAuction[_nftAddr][_tokenId];
         return (
             auction.offer,
             auction.nftAddr,
@@ -518,10 +533,10 @@ contract Web3GameStation is Ownable {
      * @dev 取消拍賣
      * @param _nftAddr, _tokenId
      */
-    function cancelAuction(address _nftAddr, uint256 _tokenId) public {
+    function cancelAuction(address _nftAddr, uint256 _tokenId) public callerIsUser {
 
         itemToken = IERC721(_nftAddr);
-        Auction memory auction = NFTTokenIdToAution[_nftAddr][_tokenId];
+        Auction memory auction = NFTTokenIdToAuction[_nftAddr][_tokenId];
         require(
             msg.sender == auction.offer,
             "Auction can be cancelled only by offer."
@@ -537,7 +552,7 @@ contract Web3GameStation is Ownable {
             payable(bidder).transfer(amount);
         }
 
-        NFTTokenIdToAution[_nftAddr][_tokenId].active = false;
+        NFTTokenIdToAuction[_nftAddr][_tokenId].active = false;
         delete NFTTokenIdToBidder[_nftAddr][_tokenId];
         
         emit AuctionStatusChange(
@@ -625,6 +640,75 @@ contract Web3GameStation is Ownable {
     modifier withdrawAddressOnly() {
         require(msg.sender == withdrawAddress, "only withdrawer can call this");
         _;
+    }
+
+    // Rent NFT
+
+    function getE721() public {
+        nftStandard = IRegistry.NFTStandard.E721;
+    }
+
+    // 注意：
+    // 1. Registry.lendings: private 改成 internal 這樣繼承才能存取。
+    // 2. uint32 才能轉換 bytes4
+    function updateDailyRentPrice(address nftAddress, uint256 tokenID, uint256 _lendingID, uint32 _updateDailyRentPrice) external notPaused callerIsUser {
+        bytes32 identifier = keccak256(abi.encodePacked(nftAddress, tokenID, _lendingID));
+        IRegistry.Lending storage lending = lendings[identifier];
+        require(msg.sender == lending.lenderAddress, "not lender!");
+        // bytes4 相當於 16 進位的值前面再補 0 。例如 555 = 22b(16 進位) = 0x0000022b (bytes4)
+        lending.dailyRentPrice = bytes4(_updateDailyRentPrice);
+        lending.availableAmount = uint16(_updateDailyRentPrice);
+        // IRegistry.Lending[] storage lendingPool = new IRegistry.Lending[](ownerLendings[msg.sender].length);
+        for (uint i = 0; i < ownerLendings[msg.sender].length; i++) {
+            IRegistry.OwnerLending storage ownerLending = ownerLendings[msg.sender][i];
+            if (ownerLending.lendingID == _lendingID) {
+                ownerLending.dailyRentPrice = bytes4(_updateDailyRentPrice);
+            }
+        }
+    }
+
+    function updateRent(address nftAddress, uint256 tokenID, uint256 _rentingID, uint16 rentAmount, uint8 rentDuration, uint32 rentedAt) external notPaused callerIsUser {
+        bytes32 identifier = keccak256(abi.encodePacked(nftAddress, tokenID, _rentingID));
+        IRegistry.Renting storage renting = rentings[identifier];
+        require(msg.sender == renting.renterAddress, "not renter!");
+        bool rentAmountUpdate = false;
+        bool rentDurationUpdate = false;
+        bool rentedAtUpdate = false;
+        if (rentAmount > 0) {
+            require(rentAmount > renting.rentAmount, "rent amount must be greater than the last amount!");
+            renting.rentAmount = rentAmount;
+            rentAmountUpdate = true;
+        }
+        if (rentDuration > 0) {
+            renting.rentDuration = rentDuration;
+            rentDurationUpdate = true;
+        }
+        if (rentedAt > 0) {
+            renting.rentedAt = rentedAt;
+            rentedAtUpdate = true;
+        }
+        for (uint i = 0; i < userRentings[msg.sender].length; i++) {
+            IRegistry.UserRenting storage userRenting = userRentings[msg.sender][i];
+            if (userRenting.rentingID == _rentingID) {
+                if (rentAmountUpdate) {
+                    userRenting.rentAmount = rentAmount;
+                }
+                if (rentDurationUpdate) {
+                    userRenting.rentDuration = rentDuration;
+                }
+                if (rentedAtUpdate) {
+                    userRenting.rentedAt = rentedAt;
+                }
+            }
+        }
+    }
+
+    function getOwnerLending(address owner) public returns(OwnerLending[] memory) {
+        return ownerLendings[owner];
+    }
+
+    function getUserRenting(address user) public returns(UserRenting[] memory) {
+        return userRentings[user];
     }
 
     fallback() external payable {}
